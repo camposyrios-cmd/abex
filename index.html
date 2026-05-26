@@ -1,0 +1,1208 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Picos de ataque a la prensa · SISM</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --bg2: #12121a;
+    --bg3: #1a1a26;
+    --surface: #1e1e2e;
+    --border: rgba(255,255,255,0.07);
+    --text: #e8e8f0;
+    --text-dim: #6b6b85;
+    --text-muted: #3d3d55;
+    --accent: #ff3b5c;
+    --campaña: #ff3b5c;
+    --influenciador: #ff9f0a;
+    --bodega: #6e40f7;
+    --sospechosa: #00d4aa;
+    --medio: #0af0ff;
+    --seguidor: #94e4a0;
+    --glow-campaña: rgba(255,59,92,0.35);
+    --glow-influenciador: rgba(255,159,10,0.35);
+    --glow-bodega: rgba(110,64,247,0.35);
+    --transition: 300ms cubic-bezier(0.4,0,0.2,1);
+    --widget-height: 620px;
+  }
+
+  /* Reset completo — no afecta al tema de WordPress */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* El widget ocupa el contenedor, NO el viewport completo */
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    width: 100%;
+    height: 100%;
+    overflow: hidden; /* sin scroll propio */
+  }
+
+  /* GRAIN OVERLAY */
+  body::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1000;
+    opacity: 0.4;
+  }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg);
+    border-radius: 12px;
+  }
+
+  /* ── HEADER ── */
+  #header {
+    padding: 14px 20px 10px;
+    background: linear-gradient(180deg, var(--bg) 60%, transparent);
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .header-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  h1 {
+    font-size: clamp(13px, 3.5vw, 20px);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    color: #fff;
+  }
+
+  h1 span { color: var(--accent); }
+
+  /* STATS BAR */
+  .stats-bar {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    margin-top: 5px;
+    flex-wrap: wrap;
+  }
+
+  .stat-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .stat-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .stat-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    transition: color var(--transition);
+  }
+
+  .stat-value.peak {
+    color: var(--accent);
+    text-shadow: 0 0 12px var(--glow-campaña);
+  }
+
+  .stat-divider {
+    width: 1px;
+    height: 26px;
+    background: var(--border);
+  }
+
+  /* LEGEND */
+  .legend {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 5px 20px;
+    flex-shrink: 0;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    opacity: 1;
+    transition: opacity var(--transition);
+    user-select: none;
+  }
+
+  .legend-item:hover { opacity: 0.8; }
+  .legend-item.dimmed { opacity: 0.25; filter: grayscale(100%); }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .legend-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+  }
+
+  /* SVG CANVAS */
+  #canvas {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  #canvas::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: var(--franja-h, 110px);
+    background: linear-gradient(180deg, rgba(10,10,15,0.6) 0%, transparent 100%);
+    border-bottom: 1px dashed rgba(255,255,255,0.05);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  #canvas svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* ARTICLE ALERT CARD */
+  #article-alert {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translate(-50%, -150%);
+    width: calc(100% - 40px);
+    max-width: 460px;
+    background: rgba(30,30,46,0.92);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-left: 3px solid var(--medio);
+    border-radius: 8px;
+    padding: 12px 14px;
+    transition: transform 0.5s cubic-bezier(0.34,1.56,0.64,1);
+    z-index: 50;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+
+  #article-alert.show { transform: translate(-50%, 0); }
+
+  .alert-eyebrow {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    color: var(--medio);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .alert-eyebrow::before {
+    content: '';
+    display: block;
+    width: 6px;
+    height: 6px;
+    background: var(--medio);
+    border-radius: 1px;
+  }
+
+  .alert-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.3;
+    margin-bottom: 4px;
+  }
+
+  .alert-meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+
+  .alert-link {
+    display: inline-block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: #fff;
+    text-decoration: none;
+    background: rgba(255,255,255,0.08);
+    padding: 4px 10px;
+    border-radius: 4px;
+    transition: background var(--transition);
+  }
+
+  .alert-link:hover { background: rgba(255,255,255,0.15); }
+
+  /* TIMELINE */
+  #timeline {
+    padding: 6px 20px 10px;
+    background: linear-gradient(0deg, var(--bg) 60%, transparent);
+    flex-shrink: 0;
+    z-index: 10;
+  }
+
+  .timeline-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+
+  .play-btn {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 12px;
+    flex-shrink: 0;
+    transition: background var(--transition), transform var(--transition);
+    outline: none;
+  }
+
+  .play-btn:hover {
+    background: var(--surface);
+    transform: scale(1.05);
+  }
+
+  .timeline-labels {
+    display: flex;
+    justify-content: space-between;
+    flex: 1;
+    margin-left: 12px;
+  }
+
+  .timeline-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+  }
+
+  .timeline-label.active { color: var(--accent); }
+
+  .peak-markers {
+    position: relative;
+    height: 16px;
+    margin-bottom: 4px;
+    margin-left: 40px;
+  }
+
+  .peak-marker {
+    position: absolute;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    cursor: pointer;
+    transition: opacity var(--transition);
+  }
+
+  .peak-marker-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    color: var(--accent);
+    white-space: nowrap;
+    letter-spacing: 0.06em;
+  }
+
+  .peak-marker-line {
+    width: 1px;
+    height: 6px;
+    background: var(--accent);
+    opacity: 0.5;
+  }
+
+  .slider-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .slider-wrap {
+    position: relative;
+    flex: 1;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 3px;
+    background: transparent;
+    outline: none;
+    cursor: pointer;
+    position: relative;
+    z-index: 2;
+  }
+
+  .slider-track {
+    position: absolute;
+    left: 0; right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 3px;
+    background: var(--bg3);
+    border-radius: 2px;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  .article-marker-track {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%,-50%) rotate(45deg);
+    width: 6px;
+    height: 6px;
+    background: var(--medio);
+    border-radius: 1px;
+    z-index: 1;
+    box-shadow: 0 0 6px rgba(10,240,255,0.8);
+    pointer-events: none;
+  }
+
+  .slider-fill {
+    position: absolute;
+    left: 0; top: 50%;
+    transform: translateY(-50%);
+    height: 3px;
+    background: linear-gradient(90deg, var(--bodega), var(--campaña));
+    border-radius: 2px;
+    pointer-events: none;
+    transition: width 0.05s;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    border: 3px solid var(--accent);
+    box-shadow: 0 0 0 3px rgba(255,59,92,0.2), 0 2px 8px rgba(0,0,0,0.5);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  input[type=range]:active::-webkit-slider-thumb {
+    transform: scale(1.2);
+    box-shadow: 0 0 0 6px rgba(255,59,92,0.2), 0 2px 8px rgba(0,0,0,0.5);
+  }
+
+  input[type=range]::-moz-range-thumb {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    border: 3px solid var(--accent);
+    box-shadow: 0 0 0 3px rgba(255,59,92,0.2);
+    cursor: pointer;
+  }
+
+  /* BUBBLES */
+  .bubble { cursor: pointer; }
+  .bubble circle { transition: filter 0.2s; }
+  .bubble:hover circle { filter: brightness(1.4) drop-shadow(0 0 8px currentColor); }
+
+  .bubble-label {
+    pointer-events: none;
+    font-family: 'IBM Plex Mono', monospace;
+    fill: rgba(255,255,255,0.7);
+    font-size: 9px;
+    text-anchor: middle;
+    dominant-baseline: middle;
+  }
+
+  /* EVIDENCE DRAWER */
+  #drawer {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0;
+    transform: translateY(100%);
+    transition: transform var(--transition);
+    z-index: 200;
+    max-height: 70%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #drawer.open { transform: translateY(0); }
+
+  .drawer-handle {
+    width: 36px; height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 12px auto 0;
+  }
+
+  .drawer-content { padding: 14px 18px 28px; }
+
+  .drawer-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .drawer-identity {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .avatar {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 17px;
+    font-weight: 800;
+    color: #fff;
+    flex-shrink: 0;
+    text-transform: uppercase;
+  }
+
+  .drawer-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.01em;
+  }
+
+  .drawer-handle-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 1px;
+  }
+
+  .group-tag {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 20px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 500;
+    margin-top: 5px;
+  }
+
+  .close-btn {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    flex-shrink: 0;
+    transition: background var(--transition), color var(--transition);
+  }
+
+  .close-btn:hover { background: var(--accent); color: #fff; }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 12px 0;
+  }
+
+  .meta-item {
+    background: var(--bg3);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+
+  .meta-item-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 3px;
+  }
+
+  .meta-item-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .impact-bar {
+    height: 5px;
+    background: var(--bg);
+    border-radius: 3px;
+    margin-top: 5px;
+    overflow: hidden;
+  }
+
+  .impact-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s cubic-bezier(0.4,0,0.2,1);
+  }
+
+  .evidence-btn {
+    display: block;
+    width: 100%;
+    padding: 12px 18px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-align: center;
+    text-decoration: none;
+    color: #fff;
+    margin-top: 14px;
+    transition: opacity var(--transition), transform var(--transition);
+    overflow: hidden;
+  }
+
+  .evidence-btn:hover { opacity: 0.85; transform: translateY(-1px); }
+  .evidence-btn:active { transform: translateY(0); }
+  .evidence-btn::after { content: ' →'; }
+
+  /* PEAK FLASH */
+  .peak-flash {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+    animation: peakFlash 0.6s ease-out forwards;
+    background: radial-gradient(ellipse at center, rgba(255,59,92,0.15) 0%, transparent 70%);
+  }
+
+  @keyframes peakFlash {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* GRID LINES */
+  .grid-line {
+    stroke: rgba(255,255,255,0.03);
+    stroke-width: 1;
+  }
+
+  /* SCRIM */
+  #scrim {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 150;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition);
+  }
+
+  #scrim.active {
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  /* EMPTY STATE */
+  .empty-state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    opacity: 0;
+    transition: opacity 0.4s;
+    pointer-events: none;
+  }
+
+  .empty-state.show { opacity: 1; }
+
+  .empty-icon { font-size: 28px; opacity: 0.3; }
+
+  .empty-text {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+  }
+
+  /* RESPONSIVE INTERNO */
+  @media (max-width: 600px) {
+    :root { --franja-h: 80px; }
+    #header { padding: 10px 14px 5px; }
+    h1 { font-size: 15px; }
+    .stats-bar { gap: 10px; }
+    .legend { padding: 4px 14px; gap: 6px; }
+    .legend-label { font-size: 8px; }
+    #timeline { padding: 5px 14px 8px; }
+    #article-alert {
+      width: calc(100% - 20px);
+      padding: 10px 12px;
+      top: 8px;
+    }
+    .alert-title { font-size: 11px; }
+    .alert-meta { margin-bottom: 6px; font-size: 9px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <div class="header-top">
+      <h1>Picos de ataque <span>a la prensa</span></h1>
+    </div>
+    <div class="stats-bar">
+      <div class="stat-item">
+        <div class="stat-label">Fecha</div>
+        <div class="stat-value" id="stat-fecha">Nov 17, 2025</div>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <div class="stat-label">Publicaciones</div>
+        <div class="stat-value" id="stat-count">0</div>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <div class="stat-label">Pico activo</div>
+        <div class="stat-value" id="stat-pico">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item" data-group="Campaña">
+      <div class="legend-dot" style="background:var(--campaña);box-shadow:0 0 6px var(--glow-campaña)"></div>
+      <span class="legend-label">Campaña / Candidato</span>
+    </div>
+    <div class="legend-item" data-group="Influenciador">
+      <div class="legend-dot" style="background:var(--influenciador);box-shadow:0 0 6px var(--glow-influenciador)"></div>
+      <span class="legend-label">Influenciador</span>
+    </div>
+    <div class="legend-item" data-group="Bodega">
+      <div class="legend-dot" style="background:var(--bodega);box-shadow:0 0 6px var(--glow-bodega)"></div>
+      <span class="legend-label">Cuenta sospechosa / Bodega</span>
+    </div>
+    <div class="legend-item" data-group="Medio">
+      <div class="legend-dot" style="background:var(--medio)"></div>
+      <span class="legend-label">Supuesto medio</span>
+    </div>
+  </div>
+
+  <div id="canvas">
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">〜</div>
+      <div class="empty-text">Sin actividad registrada en esta fecha</div>
+    </div>
+
+    <div id="article-alert">
+      <div class="alert-eyebrow">Artículo Detonante</div>
+      <div class="alert-title" id="alert-title">Título del artículo</div>
+      <div class="alert-meta"><span id="alert-date"></span> · <span id="alert-medio"></span></div>
+      <a href="#" target="_blank" id="alert-link" class="alert-link">Leer artículo original →</a>
+    </div>
+  </div>
+
+  <div id="timeline">
+    <div class="peak-markers" id="peakMarkers"></div>
+    <div class="slider-container">
+      <button id="playBtn" class="play-btn" title="Reproducir/Pausar">⏸</button>
+      <div class="slider-wrap">
+        <div class="slider-track" id="sliderTrack"></div>
+        <div class="slider-fill" id="sliderFill"></div>
+        <input type="range" id="slider" min="0" step="1">
+      </div>
+    </div>
+    <div class="timeline-header">
+      <div class="timeline-labels">
+        <span class="timeline-label" id="label-start">17 Nov 2025</span>
+        <span class="timeline-label active" id="currentDateLabel">◆ SELECCIONADO</span>
+        <span class="timeline-label" id="label-end">19 Feb 2026</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="scrim"></div>
+
+  <div id="drawer">
+    <div class="drawer-handle"></div>
+    <div class="drawer-content" id="drawerContent"></div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// DATA
+// ============================================================
+const DATA = [
+  { id: 1, fecha: "2025-11-27", pico_num: 1, tipo: "tuit", cuenta_usuario: "@abelardistas", grupo_red: "Campaña", contenido_texto: "La prensa del establecimiento ataca de nuevo a nuestro candidato. No lo permitiremos. #Abelardismo", enlace_evidencia: "https://x.com/abelardistas/status/1994006414931509263", volumen_impacto: 7 },
+  { id: 2, fecha: "2025-11-27", pico_num: 1, tipo: "tuit", cuenta_usuario: "@realsantig", grupo_red: "Influenciador", contenido_texto: "Tres tuits en el mismo día contra los periodistas que investigan a Abelardo. La coordinación es evidente.", enlace_evidencia: "https://x.com/realsantig/status/1994184124442050943", volumen_impacto: 9 },
+  { id: 3, fecha: "2025-11-28", pico_num: 1, tipo: "tuit", cuenta_usuario: "@ByViral24", grupo_red: "Medio", contenido_texto: "Medios del cartel informativo atacan al candidato del pueblo.", enlace_evidencia: "https://x.com/ByViral24/statuses/2011093336552075388", volumen_impacto: 8 },
+  { id: 4, fecha: "2025-11-29", pico_num: 1, tipo: "tuit", cuenta_usuario: "@MiguelZarateNi", grupo_red: "Influenciador", contenido_texto: "Hilo de 11 tuits documentando los ataques mediáticos coordinados.", enlace_evidencia: "https://x.com/MiguelZarateNi/status/1994898752474427581", volumen_impacto: 8 },
+  { id: 5, fecha: "2025-11-29", pico_num: 1, tipo: "tuit", cuenta_usuario: "@Natalia__Gar", grupo_red: "Campaña", contenido_texto: "La prensa del establecimiento miente de forma sistemática. Compartid para que no quede impune. 🐅", enlace_evidencia: "https://x.com/Natalia__Gar/status/1994901072452653309", volumen_impacto: 6 },
+  { id: 6, fecha: "2025-11-29", pico_num: 1, tipo: "tuit", cuenta_usuario: "@ByViral24", grupo_red: "Medio", contenido_texto: "Exclusiva: documentamos los vínculos entre medios oligárquicos y la campaña de desprestigio contra Abelardo.", enlace_evidencia: "https://x.com/ByViral24/status/1994102278198821164", volumen_impacto: 7 },
+  { id: 7, fecha: "2025-11-30", pico_num: 1, tipo: "tuit", cuenta_usuario: "@VaneDeCol", grupo_red: "Campaña", contenido_texto: "No descansaremos hasta que la verdad salga a la luz.", enlace_evidencia: "https://x.com/VaneDeCol/status/1994021938185081100", volumen_impacto: 5 },
+  { id: 8, fecha: "2025-11-30", pico_num: 1, tipo: "tuit", cuenta_usuario: "@defensoresco", grupo_red: "Campaña", contenido_texto: "Defensores de la Patria rechaza la campaña de desinformación y manipulación digital.", enlace_evidencia: "https://x.com/defensoresco/status/1995203319548334177", volumen_impacto: 9 },
+  { id: 9, fecha: "2025-11-30", pico_num: 1, tipo: "tuit", cuenta_usuario: "@ANIABELLO_R", grupo_red: "Campaña", contenido_texto: "La prensa enemiga del pueblo actúa en bloque. Pero el pueblo también actúa en bloque. #DefensoresDelaPatria 🇨🇴", enlace_evidencia: "https://x.com/ANIABELLO_R/status/1995199830382010420", volumen_impacto: 6 },
+  { id: 10, fecha: "2026-01-11", pico_num: 2, tipo: "tuit", cuenta_usuario: "@ByViral24", grupo_red: "Medio", contenido_texto: "Ataque coordinado contra Ana Bejarano: la misma red de siempre activa sus cuentas.", enlace_evidencia: "https://x.com/ByViral24/status/2010483489125118336", volumen_impacto: 8 },
+  { id: 11, fecha: "2026-01-11", pico_num: 2, tipo: "tuit", cuenta_usuario: "@AdrianaVeterin", grupo_red: "Bodega", contenido_texto: "Periodistas del establecimiento que atacan al candidato del pueblo: los conocemos a todos.", enlace_evidencia: "https://x.com/AdrianaVeterin/status/2010469914071519555", volumen_impacto: 7 },
+  { id: 12, fecha: "2026-01-11", pico_num: 2, tipo: "tuit", cuenta_usuario: "@ADLE_Presidente", grupo_red: "Campaña", contenido_texto: "La prensa que miente sobre Colombia hoy recibirá la respuesta del pueblo mañana. Firmes. 🐅🫡", enlace_evidencia: "https://x.com/ADLE_Presidente/status/2010444998722961779", volumen_impacto: 9 },
+  { id: 13, fecha: "2026-01-11", pico_num: 2, tipo: "tuit", cuenta_usuario: "@Natalia__Gar", grupo_red: "Campaña", contenido_texto: "Ana Bejarano vuelve a mentir. La bodega mediática nunca descansa.", enlace_evidencia: "https://x.com/Natalia__Gar/status/2010434413188792441", volumen_impacto: 6 },
+  { id: 14, fecha: "2026-01-13", pico_num: 2, tipo: "tuit", cuenta_usuario: "@realsantig", grupo_red: "Influenciador", contenido_texto: "Hilo completo documentando el montaje de La Silla Vacía y Juanita León contra el movimiento. 🧵", enlace_evidencia: "https://x.com/realsantig/status/2011124661476569378", volumen_impacto: 10 },
+  { id: 15, fecha: "2026-01-13", pico_num: 2, tipo: "tuit", cuenta_usuario: "@MiguelZarateNi", grupo_red: "Influenciador", contenido_texto: "Video que otros replican: pruebas del montaje fotográfico contra el candidato.", enlace_evidencia: "https://x.com/MiguelZarateNi/status/2011145341312323975", volumen_impacto: 9 },
+  { id: 16, fecha: "2026-01-13", pico_num: 2, tipo: "tuit", cuenta_usuario: "@AdrianaVeterin", grupo_red: "Bodega", contenido_texto: "Imagen del montaje hecho a Juanita León y Pinzón que circula en la red.", enlace_evidencia: "https://x.com/AdrianaVeterin/status/2011204393798906065", volumen_impacto: 8 },
+  { id: 17, fecha: "2026-01-13", pico_num: 2, tipo: "tuit", cuenta_usuario: "@defensoresco", grupo_red: "Campaña", contenido_texto: "Comunicado oficial: denunciamos los ataques coordinados de La Silla Vacía.", enlace_evidencia: "https://x.com/defensoresco/status/2011057132267802975", volumen_impacto: 9 },
+  { id: 18, fecha: "2026-01-13", pico_num: 2, tipo: "tuit", cuenta_usuario: "@VincenthRamos", grupo_red: "Influenciador", contenido_texto: "Video denunciando las mentiras públicas del periodista de Coronell sobre el movimiento.", enlace_evidencia: "https://x.com/VincenthRamos/status/2011172929971605725", volumen_impacto: 7 },
+  { id: 19, fecha: "2026-01-13", pico_num: 2, tipo: "tuit", cuenta_usuario: "@JBAGBAM", grupo_red: "Bodega", contenido_texto: "Los periodistas del cartel mediático saben que sus días están contados.", enlace_evidencia: "https://x.com/JBAGBAM/status/1994142595568791577", volumen_impacto: 5 },
+  { id: 20, fecha: "2026-01-13", pico_num: 2, tipo: "tuit", cuenta_usuario: "@ADLE_Presidente", grupo_red: "Campaña", contenido_texto: "Hilo de respuesta a los ataques: presentamos las pruebas que la prensa del establecimiento oculta.", enlace_evidencia: "https://x.com/ADLE_Presidente/status/2011064656169763068", volumen_impacto: 9 },
+  { id: 21, fecha: "2026-01-13", pico_num: 2, tipo: "tuit", cuenta_usuario: "@ElUltraDerechi1", grupo_red: "Bodega", contenido_texto: "La Silla Vacía ataca a Abelardo: análisis del patrón de desinformación.", enlace_evidencia: "https://x.com/ElUltraDerechi1/status/2011139503734616409", volumen_impacto: 6 },
+  { id: 22, fecha: "2026-01-14", pico_num: 2, tipo: "tuit", cuenta_usuario: "@AbelardoPTE", grupo_red: "Campaña", contenido_texto: "La prensa del establecimiento fabrica mentiras. Pero el tigre sigue adelante. 🐅", enlace_evidencia: "https://x.com/AbelardoPTE/status/2011523327194701839", volumen_impacto: 7 },
+  { id: 23, fecha: "2026-01-16", pico_num: 2, tipo: "tuit", cuenta_usuario: "@AdrianaVeterin", grupo_red: "Bodega", contenido_texto: "Nuevo ataque coordinado de los medios. Ya perdemos la cuenta.", enlace_evidencia: "https://x.com/AdrianaVeterin/status/2012268549415322013", volumen_impacto: 6 },
+  { id: 24, fecha: "2026-01-18", pico_num: 2, tipo: "tuit", cuenta_usuario: "@MiguelZarateNi", grupo_red: "Influenciador", contenido_texto: "Cierre del ciclo de ataques de enero: resumen de las mentiras documentadas.", enlace_evidencia: "https://x.com/MiguelZarateNi/status/2012761085724512506", volumen_impacto: 7 },
+  { id: 25, fecha: "2026-01-22", pico_num: 3, tipo: "tuit", cuenta_usuario: "@AdrianaVeterin", grupo_red: "Bodega", contenido_texto: "Nuevo ataque contra Ana Bejarano. La misma red, la misma táctica.", enlace_evidencia: "https://x.com/AdrianaVeterin/status/2014391510867804167", volumen_impacto: 8 },
+  { id: 26, fecha: "2026-01-22", pico_num: 3, tipo: "tuit", cuenta_usuario: "@SofyCasas_", grupo_red: "Campaña", contenido_texto: "La periodista Ana Bejarano vuelve a ser blanco de la campaña de acoso coordinado.", enlace_evidencia: "https://x.com/SofyCasas_/status/2014375529365807596", volumen_impacto: 6 },
+  { id: 27, fecha: "2026-01-23", pico_num: 3, tipo: "tuit", cuenta_usuario: "@SebasCaicedo_", grupo_red: "Influenciador", contenido_texto: "El actor Sebastián Caicedo se suma a los ataques.", enlace_evidencia: "https://x.com/SebasCaicedo_/status/2014358794638164417", volumen_impacto: 9 },
+  { id: 28, fecha: "2026-01-23", pico_num: 3, tipo: "tuit", cuenta_usuario: "@ByViral24", grupo_red: "Medio", contenido_texto: "Documentamos el nuevo ciclo de ataques contra Ana Bejarano: mismas cuentas, mismo patrón.", enlace_evidencia: "https://x.com/ByViral24/status/2014727683649708066", volumen_impacto: 8 },
+  { id: 29, fecha: "2026-01-23", pico_num: 3, tipo: "tuit", cuenta_usuario: "@SofyCasas_", grupo_red: "Campaña", contenido_texto: "La periodista recibe insultos coordinados. Esto es acoso digital.", enlace_evidencia: "https://x.com/SofyCasas_/status/2014764947528421878", volumen_impacto: 7 },
+  { id: 30, fecha: "2026-02-02", pico_num: 4, tipo: "tuit", cuenta_usuario: "@AbelardoPTE", grupo_red: "Campaña", contenido_texto: "Comunicado oficial del movimiento en respuesta a los nuevos ataques. 📰", enlace_evidencia: "https://x.com/AbelardoPTE/status/2018428848929439909", volumen_impacto: 8 },
+  { id: 31, fecha: "2026-02-02", pico_num: 4, tipo: "tuit", cuenta_usuario: "@GermanCalderonE", grupo_red: "Campaña", contenido_texto: "Análisis jurídico de los ataques mediáticos coordinados. 🧵", enlace_evidencia: "https://x.com/GermanCalderonE/status/2018414394690990245", volumen_impacto: 8 },
+  { id: 32, fecha: "2026-02-02", pico_num: 4, tipo: "tuit", cuenta_usuario: "@ADLESinCensura", grupo_red: "Campaña", contenido_texto: "Los medios que atacan a Abelardo reciben financiación de los mismos poderes que quieren detener el cambio.", enlace_evidencia: "https://x.com/ADLESinCensura/status/2018422517904662987", volumen_impacto: 7 },
+  { id: 33, fecha: "2026-02-02", pico_num: 4, tipo: "tuit", cuenta_usuario: "@ADLE_Presidente", grupo_red: "Campaña", contenido_texto: "La prensa del establecimiento nunca para. Pero nosotros tampoco. 🐅🫡", enlace_evidencia: "https://x.com/ADLE_Presidente/status/2018498069155786935", volumen_impacto: 9 },
+  { id: 34, fecha: "2026-02-02", pico_num: 4, tipo: "tuit", cuenta_usuario: "@realsantig", grupo_red: "Influenciador", contenido_texto: "Nuevo ciclo de ataques coordinados. Documentamos cada uno.", enlace_evidencia: "https://x.com/realsantig/status/2018419249622982894", volumen_impacto: 8 },
+  { id: 35, fecha: "2026-02-02", pico_num: 4, tipo: "tuit", cuenta_usuario: "@MiguelZarateNi", grupo_red: "Influenciador", contenido_texto: "La red de amplificación en plena acción. Cuentas coordinadas difunden narrativa falsa.", enlace_evidencia: "https://x.com/MiguelZarateNi/status/2018538036116570437", volumen_impacto: 8 },
+  { id: 36, fecha: "2026-02-03", pico_num: 4, tipo: "tuit", cuenta_usuario: "@AdrianaVeterin", grupo_red: "Bodega", contenido_texto: "Periodistas corruptos que fabrican noticias contra Abelardo: los documentamos uno por uno.", enlace_evidencia: "https://x.com/AdrianaVeterin/status/2018656707606728792", volumen_impacto: 6 },
+  { id: 37, fecha: "2026-02-05", pico_num: 4, tipo: "tuit", cuenta_usuario: "@JBAGBAM", grupo_red: "Bodega", contenido_texto: "La Silla Vacía miente de nuevo.", enlace_evidencia: "https://x.com/JBAGBAM/status/2019391513499983939", volumen_impacto: 5 },
+  { id: 38, fecha: "2026-02-05", pico_num: 4, tipo: "tuit", cuenta_usuario: "@ElUltraDerechi1", grupo_red: "Bodega", contenido_texto: "Nuevo ataque contra Ana Bejarano: la red de acoso digital activa sus cuentas de forma coordinada.", enlace_evidencia: "https://x.com/ElUltraDerechi1/status/2019542191727866029", volumen_impacto: 6 },
+  { id: 39, fecha: "2026-02-09", pico_num: 4, tipo: "tuit", cuenta_usuario: "@GermanCalderonE", grupo_red: "Campaña", contenido_texto: "La red amplificadora no descansa. Cada periodista que investiga recibe su ración de ataques.", enlace_evidencia: "https://x.com/GermanCalderonE/status/2020765955987472738", volumen_impacto: 7 },
+  { id: 40, fecha: "2026-02-11", pico_num: 5, tipo: "tuit", cuenta_usuario: "@ByViral24", grupo_red: "Medio", contenido_texto: "Ataque coordinado contra Coronell, Cecilia Orozco y Cambio Colombia.", enlace_evidencia: "https://x.com/ByViral24/status/2021554058494894428", volumen_impacto: 9 },
+  { id: 41, fecha: "2026-02-11", pico_num: 5, tipo: "tuit", cuenta_usuario: "@AbelardoPTE", grupo_red: "Campaña", contenido_texto: "Tres tuits en horas contra Coronell y Cambio Colombia. La campaña de desprestigio escala.", enlace_evidencia: "https://x.com/AbelardoPTE/status/2021640908593098899", volumen_impacto: 9 },
+  { id: 42, fecha: "2026-02-11", pico_num: 5, tipo: "tuit", cuenta_usuario: "@ElUltraDerechi1", grupo_red: "Bodega", contenido_texto: "Hilo de 7 tuits: el Cartel de las Mentiras explicado.", enlace_evidencia: "https://x.com/ElUltraDerechi1/status/2021652619014602924", volumen_impacto: 8 },
+  { id: 43, fecha: "2026-02-11", pico_num: 5, tipo: "tuit", cuenta_usuario: "@GermanCalderonE", grupo_red: "Campaña", contenido_texto: "Análisis del nuevo frente de ataques: por qué Coronell y Cambio Colombia son el objetivo principal.", enlace_evidencia: "https://x.com/GermanCalderonE/status/2021680876854136858", volumen_impacto: 7 },
+  { id: 44, fecha: "2026-02-12", pico_num: 5, tipo: "tuit", cuenta_usuario: "@ADLE_Presidente", grupo_red: "Campaña", contenido_texto: "Video del Cartel de las Mentiras contra Coronell amplificado masivamente.", enlace_evidencia: "https://x.com/ADLE_Presidente/status/2021973181972480309", volumen_impacto: 10 },
+  { id: 45, fecha: "2026-02-15", pico_num: 5, tipo: "tuit", cuenta_usuario: "@AbelardoPTE", grupo_red: "Campaña", contenido_texto: "El mismo video del Cartel de las Mentiras reaparece amplificado. La red recicla su contenido.", enlace_evidencia: "https://x.com/AbelardoPTE/status/2023150241051267177", volumen_impacto: 8 },
+  { id: 46, fecha: "2026-02-17", pico_num: 5, tipo: "tuit", cuenta_usuario: "@AbelardoPTE", grupo_red: "Campaña", contenido_texto: "Calumniel: video creado con IA muestra a Coronell recibiendo un maletín de dinero. Desinformación audiovisual fabricada.", enlace_evidencia: "https://x.com/AbelardoPTE/status/2023805684253642845", volumen_impacto: 10 },
+  { id: 47, fecha: "2026-02-17", pico_num: 5, tipo: "tuit", cuenta_usuario: "@AbelardoPTE", grupo_red: "Campaña", contenido_texto: "Audio que supuestamente incrimina a Coronell: desinformación fabricada y amplificada.", enlace_evidencia: "https://x.com/AbelardoPTE/status/2023721080020475967", volumen_impacto: 9 },
+  { id: 48, fecha: "2026-02-19", pico_num: 5, tipo: "tuit", cuenta_usuario: "@ElUltraDerechi1", grupo_red: "Bodega", contenido_texto: "Continúan los ataques contra Coronell y la Silla. La red de desinformación no da tregua.", enlace_evidencia: "https://x.com/ElUltraDerechi1/status/2024612463916822941", volumen_impacto: 7 },
+  { id: 49, fecha: "2026-02-22", pico_num: 5, tipo: "tuit", cuenta_usuario: "@AdrianaVeterin", grupo_red: "Bodega", contenido_texto: "Cierre del ciclo: ataques contra Ana Cristina Restrepo sumados a los de Coronell.", enlace_evidencia: "https://x.com/AdrianaVeterin/status/2025635515018428756", volumen_impacto: 7 },
+  { id: 50, fecha: "2026-02-22", pico_num: 5, tipo: "tuit", cuenta_usuario: "@ANIABELLO_R", grupo_red: "Campaña", contenido_texto: "Nuevo objetivo: Ana Cristina Restrepo en la mira.", enlace_evidencia: "https://x.com/ANIABELLO_R/status/2025729404991615375", volumen_impacto: 6 }
+];
+
+const ARTICLES = [
+  { fecha: "2025-11-17", pico: 1, medio: "Cambio Colombia", titulo: "El tigre de papel", url: "https://cambiocolombia.com/puntos-de-vista/articulo/2025/11/el-tigre-de-papel/" },
+  { fecha: "2025-11-26", pico: 1, medio: "La Silla Vacía", titulo: "Militantes de Abelardo se coordinan para atacar a Vicky y a Pinzón en redes", url: "https://www.lasillavacia.com/silla-nacional/militantes-de-abelardo-se-coordinan-para-atacar-a-vicky-y-a-pinzon-en-redes/" },
+  { fecha: "2025-12-07", pico: null, medio: "Los Danieles / Cambio", titulo: "Abelardo tercero", url: "https://cambiocolombia.com/los-danieles/articulo/2025/12/abelardo-tercero/" },
+  { fecha: "2026-01-11", pico: 2, medio: "Los Danieles / Cambio", titulo: "Columna de Ana Bejarano: Alex y Abelardo", url: "https://cambiocolombia.com/los-danieles/articulo/2026/1/alex-y-abelardo/" },
+  { fecha: "2026-01-13", pico: 2, medio: "La Silla Vacía", titulo: "El universo empresarial de La Espriella", url: "https://www.lasillavacia.com/silla-nacional/el-universo-empresarial-de-la-espriella-socios-cuestionados-saldos-en-rojo-y-bienes-raices/" },
+  { fecha: "2026-01-16", pico: 2, medio: "FLIP", titulo: "La FLIP advierte sobre el impacto del acoso judicial en el debate público", url: "https://flip.org.co/pronunciamientos/la-flip-advierte-sobre-el-impacto-del-acoso-judicial-en-el-debate-publico" },
+  { fecha: "2026-01-17", pico: 2, medio: "La Silla Vacía", titulo: "Solicitud pública de rectificación a la campaña de La Espriella", url: "https://www.lasillavacia.com/opinion/solicitud-publica-de-rectificacion-a-la-campana-de-la-espriella/" },
+  { fecha: "2026-01-25", pico: 3, medio: "Vorágine", titulo: "La apuesta de De La Espriella: arruinar periodistas para silenciarlos", url: "https://voragine.co/historias/investigacion/la-apuesta-de-de-la-espriella-arruinar-periodistas-para-silenciarlos/" },
+  { fecha: "2026-01-26", pico: 3, medio: "La Silla Vacía", titulo: "El giro de Germán Calderón, abogado de la campaña de La Espriella", url: "https://www.lasillavacia.com/silla-nacional/el-giro-de-german-calderon-abogado-de-la-campana-de-la-espriella/" },
+  { fecha: "2026-02-11", pico: 5, medio: "El Espectador", titulo: "De la Espriella: 62% de sus firmas no fue avalado (Cecilia Orozco)", url: "https://www.elespectador.com/opinion/columnistas/cecilia-orozco-tascon/de-la-espriella-62-de-sus-cinco-millones-de-firmas-no-fue-avalado/" },
+  { fecha: "2026-02-12", pico: 5, medio: "Reporte Coronell", titulo: "Daniel Coronell y David Murcia (Entrevista)", url: "https://www.youtube.com/watch?v=eDUZzPXF0FQ" },
+  { fecha: "2026-02-22", pico: 5, medio: "Los Danieles / Cambio", titulo: "Las copias perdidas (Daniel Coronell)", url: "https://cambiocolombia.com/los-danieles/articulo/2026/2/las-copias-perdidas/" },
+  { fecha: "2026-02-22", pico: 5, medio: "Cambio Colombia", titulo: "Los 760 millones de pesos que persiguen a Abelardo (M.J. Duzán)", url: "https://cambiocolombia.com/puntos-de-vista/articulo/2026/2/los-760-millones-de-pesos-que-persiguen-a-abelardo-de-la-espriella/" }
+];
+
+const GROUP_COLORS = {
+  "Campaña":       "#ff3b5c",
+  "Influenciador": "#ff9f0a",
+  "Bodega":        "#6e40f7",
+  "Medio":         "#0af0ff",
+  "Seguidor":      "#94e4a0"
+};
+
+const GROUP_GLOW = {
+  "Campaña":       "rgba(255,59,92,0.5)",
+  "Influenciador": "rgba(255,159,10,0.5)",
+  "Bodega":        "rgba(110,64,247,0.5)",
+  "Medio":         "rgba(10,240,255,0.5)",
+  "Seguidor":      "rgba(148,228,160,0.5)"
+};
+
+// ============================================================
+// FILTROS DE LEYENDA
+// ============================================================
+const activeGroups = new Set(Object.keys(GROUP_COLORS));
+
+document.querySelectorAll('.legend-item').forEach(item => {
+  item.addEventListener('click', () => {
+    const group = item.dataset.group;
+    if (activeGroups.has(group)) {
+      activeGroups.delete(group);
+      item.classList.add('dimmed');
+    } else {
+      activeGroups.add(group);
+      item.classList.remove('dimmed');
+    }
+    updateViz(+slider.value);
+  });
+});
+
+// ============================================================
+// FECHAS
+// ============================================================
+const allDatesSet = new Set(DATA.map(d => d.fecha));
+ARTICLES.forEach(a => allDatesSet.add(a.fecha));
+const allDates = [...allDatesSet].sort();
+
+const slider = document.getElementById("slider");
+slider.max = allDates.length - 1;
+slider.value = 0;
+
+document.getElementById("label-start").textContent = new Date(allDates[0]+"T12:00:00").toLocaleDateString("es-CO",{day:"numeric",month:"short",year:"numeric"});
+document.getElementById("label-end").textContent = new Date(allDates[allDates.length-1]+"T12:00:00").toLocaleDateString("es-CO",{day:"numeric",month:"short",year:"numeric"});
+
+const PICOS = [
+  { fecha: "2025-11-27", label: "P1 ▲" },
+  { fecha: "2026-01-13", label: "P2" },
+  { fecha: "2026-01-22", label: "P3" },
+  { fecha: "2026-02-02", label: "P4" },
+  { fecha: "2026-02-11", label: "P5 ▲ MAX" },
+];
+
+// ============================================================
+// PEAK & ARTICLE MARKERS
+// ============================================================
+const peakMarkersEl = document.getElementById("peakMarkers");
+PICOS.forEach(p => {
+  const idx = allDates.indexOf(p.fecha);
+  if (idx < 0) return;
+  const pct = idx / (allDates.length - 1) * 100;
+  const marker = document.createElement("div");
+  marker.className = "peak-marker";
+  marker.style.left = pct + "%";
+  marker.innerHTML = `<span class="peak-marker-label">${p.label}</span><div class="peak-marker-line"></div>`;
+  marker.addEventListener("click", () => { slider.value = idx; pausePlay(); updateViz(idx); });
+  peakMarkersEl.appendChild(marker);
+});
+
+const sliderTrackEl = document.getElementById("sliderTrack");
+ARTICLES.forEach(a => {
+  const idx = allDates.indexOf(a.fecha);
+  if (idx < 0) return;
+  const pct = idx / (allDates.length - 1) * 100;
+  const marker = document.createElement("div");
+  marker.className = "article-marker-track";
+  marker.style.left = pct + "%";
+  sliderTrackEl.appendChild(marker);
+});
+
+// ============================================================
+// D3 SETUP — usa el contenedor #app, no window
+// ============================================================
+const appEl = document.getElementById("app");
+const canvas = document.getElementById("canvas");
+const svg = d3.select("#canvas").append("svg");
+let W, H;
+let franjaAltura = 110;
+
+function resize() {
+  W = canvas.clientWidth;
+  H = canvas.clientHeight;
+  franjaAltura = W <= 600 ? 80 : 110;
+  svg.attr("viewBox", `0 0 ${W} ${H}`);
+  svg.selectAll(".grid-line").remove();
+  for (let i = 1; i < 6; i++) {
+    svg.append("line").attr("class","grid-line")
+      .attr("x1",0).attr("y1",H*i/6).attr("x2",W).attr("y2",H*i/6);
+    svg.append("line").attr("class","grid-line")
+      .attr("x1",W*i/6).attr("y1",franjaAltura).attr("x2",W*i/6).attr("y2",H);
+  }
+}
+resize();
+
+// ResizeObserver para reaccionar al cambio del contenedor del iframe
+const ro = new ResizeObserver(() => { resize(); updateViz(+slider.value); });
+ro.observe(canvas);
+
+// ============================================================
+// SIMULACIÓN D3
+// ============================================================
+let simulation;
+let currentNodes = [];
+
+function initSimulation(nodes) {
+  if (simulation) simulation.stop();
+  simulation = d3.forceSimulation(nodes)
+    .force("center", d3.forceCenter(W/2, (H+franjaAltura)/2).strength(0.05))
+    .force("collide", d3.forceCollide(d => d.r+3).strength(0.7).iterations(3))
+    .force("x", d3.forceX(W/2).strength(0.03))
+    .force("y", d3.forceY((H+franjaAltura)/2).strength(0.04))
+    .force("charge", d3.forceManyBody().strength(-8))
+    .alphaDecay(0.025)
+    .velocityDecay(0.35)
+    .on("tick", ticked);
+  return simulation;
+}
+
+function ticked() {
+  svg.selectAll(".bubble")
+    .attr("transform", d => {
+      const padding = 2;
+      d.x = Math.max(d.r+padding, Math.min(W-d.r-padding, d.x));
+      d.y = Math.max(d.r+padding+franjaAltura, Math.min(H-d.r-padding, d.y));
+      return `translate(${d.x},${d.y})`;
+    });
+}
+
+// ============================================================
+// UPDATE
+// ============================================================
+let lastPico = -1;
+
+function updateViz(idx) {
+  const fecha = allDates[idx];
+  const d = new Date(fecha+"T12:00:00");
+  const fmtFecha = d.toLocaleDateString("es-CO",{day:"numeric",month:"short",year:"numeric"});
+  document.getElementById("stat-fecha").textContent = fmtFecha;
+  document.getElementById("currentDateLabel").textContent = `◆ ${fmtFecha.toUpperCase()}`;
+
+  const visible = DATA.filter(d => d.fecha <= fecha && activeGroups.has(d.grupo_red));
+  const byUser = {};
+  visible.forEach(d => { byUser[d.cuenta_usuario] = d; });
+  const nodes = Object.values(byUser);
+
+  document.getElementById("stat-count").textContent = visible.length;
+
+  const picoActivo = PICOS.find(p => p.fecha === fecha);
+  const statPico = document.getElementById("stat-pico");
+  if (picoActivo) {
+    statPico.textContent = picoActivo.label;
+    statPico.classList.add("peak");
+  } else {
+    const closest = [...PICOS].filter(p => p.fecha <= fecha).pop();
+    statPico.textContent = closest ? closest.label : "—";
+    statPico.classList.toggle("peak", !!closest && closest.fecha === fecha);
+  }
+
+  document.getElementById("emptyState").classList.toggle("show", nodes.length === 0);
+
+  const pastArticles = ARTICLES.filter(a => a.fecha <= fecha);
+  let activeArticle = null;
+  if (pastArticles.length > 0) {
+    const latestArticle = pastArticles[pastArticles.length-1];
+    const diffDays = (new Date(fecha)-new Date(latestArticle.fecha))/(1000*60*60*24);
+    if (diffDays >= 0 && diffDays <= 10) activeArticle = latestArticle;
+  }
+
+  const alertCard = document.getElementById("article-alert");
+  if (activeArticle) {
+    document.getElementById("alert-title").textContent = activeArticle.titulo;
+    document.getElementById("alert-medio").textContent = activeArticle.medio;
+    document.getElementById("alert-date").textContent = new Date(activeArticle.fecha+"T12:00:00").toLocaleDateString("es-CO",{day:"numeric",month:"short"});
+    document.getElementById("alert-link").href = activeArticle.url;
+    alertCard.classList.add("show");
+  } else {
+    alertCard.classList.remove("show");
+  }
+
+  const rScale = W <= 600 ? 0.65 : 1;
+  nodes.forEach(d => {
+    d.r = (12 + d.volumen_impacto*4.5)*rScale;
+    if (!d.x) {
+      d.x = W/2+(Math.random()-0.5)*150;
+      d.y = (H+franjaAltura)/2+(Math.random()-0.5)*150;
+    }
+  });
+
+  const bubbles = svg.selectAll(".bubble").data(nodes, d => d.id);
+
+  const enter = bubbles.enter()
+    .append("g")
+    .attr("class","bubble")
+    .attr("transform", d => `translate(${d.x||W/2},${d.y||(H+franjaAltura)/2})`)
+    .style("opacity",0)
+    .on("click",(event,d) => { pausePlay(); openDrawer(d); });
+
+  enter.append("circle")
+    .attr("r",0)
+    .attr("fill", d => GROUP_COLORS[d.grupo_red]||"#888")
+    .attr("fill-opacity",0.15)
+    .attr("stroke", d => GROUP_COLORS[d.grupo_red]||"#888")
+    .attr("stroke-width",1.5)
+    .attr("filter", d => `drop-shadow(0 0 ${d.r*0.4}px ${GROUP_GLOW[d.grupo_red]||"rgba(255,255,255,0.3)"})`)
+    .transition().duration(500).ease(d3.easeBounceOut)
+    .attr("r", d => d.r);
+
+  enter.append("text")
+    .attr("class","bubble-label")
+    .attr("dy","0.35em")
+    .text(d => d.cuenta_usuario.replace("@","").slice(0,8))
+    .style("font-size", d => Math.max(7,d.r*0.38)+"px");
+
+  enter.transition().duration(300).style("opacity",1);
+
+  bubbles.select("circle")
+    .attr("fill", d => GROUP_COLORS[d.grupo_red]||"#888")
+    .attr("stroke", d => GROUP_COLORS[d.grupo_red]||"#888");
+
+  bubbles.exit()
+    .transition().duration(300)
+    .style("opacity",0)
+    .attr("transform", d => `translate(${d.x},${d.y}) scale(0)`)
+    .remove();
+
+  currentNodes = nodes;
+  initSimulation(nodes);
+
+  const countOnDate = DATA.filter(d => d.fecha===fecha && activeGroups.has(d.grupo_red)).length;
+  const picoNum = DATA.find(d => d.fecha===fecha)?.pico_num;
+
+  if (countOnDate >= 3 || picoNum !== lastPico) {
+    const energía = Math.min(0.9, 0.2+countOnDate*0.08);
+    simulation.alpha(energía).alphaDecay(0.02).velocityDecay(0.2).restart();
+    if (countOnDate >= 5) {
+      const flash = document.createElement("div");
+      flash.className = "peak-flash";
+      appEl.appendChild(flash);  // ← al app, no al body
+      setTimeout(() => flash.remove(), 700);
+    }
+  }
+
+  lastPico = picoNum ?? lastPico;
+  const pct = (idx/(allDates.length-1))*100;
+  document.getElementById("sliderFill").style.width = pct+"%";
+}
+
+// ============================================================
+// REPRODUCTOR
+// ============================================================
+let isPlaying = true;
+let playInterval = null;
+const playBtn = document.getElementById('playBtn');
+
+function startPlay() {
+  if (playInterval) clearInterval(playInterval);
+  isPlaying = true;
+  playBtn.textContent = '⏸';
+  if (+slider.value >= allDates.length-1) slider.value = 0;
+  playInterval = setInterval(() => {
+    let current = +slider.value;
+    if (current >= allDates.length-1) {
+      pausePlay(); slider.value = 0; updateViz(0); return;
+    }
+    slider.value = current+1;
+    updateViz(current+1);
+  }, 500);
+}
+
+function pausePlay() {
+  isPlaying = false;
+  playBtn.textContent = '▶';
+  if (playInterval) clearInterval(playInterval);
+}
+
+playBtn.addEventListener('click', () => { if (isPlaying) pausePlay(); else startPlay(); });
+slider.addEventListener("input", () => { pausePlay(); updateViz(+slider.value); });
+
+// ============================================================
+// EVIDENCE DRAWER
+// ============================================================
+const drawer = document.getElementById("drawer");
+const drawerContent = document.getElementById("drawerContent");
+const scrim = document.getElementById("scrim");
+
+function openDrawer(d) {
+  const color = GROUP_COLORS[d.grupo_red]||"#888";
+  const initial = d.cuenta_usuario.replace("@","")[0].toUpperCase();
+  drawerContent.innerHTML = `
+    <div class="drawer-header">
+      <div class="drawer-identity">
+        <div class="avatar" style="background:${color}22;border:2px solid ${color}">${initial}</div>
+        <div>
+          <div class="drawer-name">${d.cuenta_usuario}</div>
+          <div class="drawer-handle-name">X (Twitter) · ${d.tipo==="tuit"?"Tweet":"Artículo"}</div>
+          <span class="group-tag" style="background:${color}18;color:${color};border:1px solid ${color}44">${d.grupo_red}</span>
+        </div>
+      </div>
+      <button class="close-btn" id="closeDrawerBtn">✕</button>
+    </div>
+    <div class="meta-grid">
+      <div class="meta-item">
+        <div class="meta-item-label">Fecha del ataque</div>
+        <div class="meta-item-value">${new Date(d.fecha+"T12:00:00").toLocaleDateString("es-CO",{day:"numeric",month:"long",year:"numeric"})}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-item-label">Pico nº</div>
+        <div class="meta-item-value" style="color:${color}">Pico ${d.pico_num}</div>
+      </div>
+      <div class="meta-item" style="grid-column:1/-1">
+        <div class="meta-item-label">Impacto estimado</div>
+        <div class="meta-item-value">${d.volumen_impacto}/10</div>
+        <div class="impact-bar"><div class="impact-fill" style="width:${d.volumen_impacto*10}%;background:${color}"></div></div>
+      </div>
+    </div>
+    <a href="${d.enlace_evidencia}" target="_blank" rel="noopener noreferrer" class="evidence-btn" style="background:${color}">Ver evidencia original</a>
+  `;
+  drawer.classList.add("open");
+  scrim.classList.add("active");
+  document.getElementById("closeDrawerBtn").addEventListener("click", closeDrawer);
+}
+
+function closeDrawer() {
+  drawer.classList.remove("open");
+  scrim.classList.remove("active");
+}
+
+scrim.addEventListener("click", closeDrawer);
+
+let touchStartY = 0;
+drawer.addEventListener("touchstart", e => { touchStartY = e.touches[0].clientY; }, { passive: true });
+drawer.addEventListener("touchend", e => {
+  const delta = e.changedTouches[0].clientY - touchStartY;
+  if (delta > 60) closeDrawer();
+}, { passive: true });
+
+// ============================================================
+// INICIALIZAR
+// ============================================================
+updateViz(0);
+startPlay();
+</script>
+</body>
+</html>
