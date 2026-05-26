@@ -33,16 +33,17 @@
   /* Reset completo — no afecta al tema de WordPress */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  /* El widget ocupa el contenedor, NO el viewport completo */
+  /* El widget ocupa el contenedor, con una altura mínima segura */
   html, body {
     background: var(--bg);
     color: var(--text);
     font-family: 'Syne', sans-serif;
     width: 100%;
-    height: 100%;
-    overflow: hidden; /* sin scroll propio */
+    min-height: 100vh; /* Cambiado de 100% a min-height: 100vh */
+    margin: 0;
+    overflow: hidden; 
   }
-
+  
   /* GRAIN OVERLAY */
   body::before {
     content: '';
@@ -54,17 +55,18 @@
     opacity: 0.4;
   }
 
-  #app {
+#app {
     display: flex;
     flex-direction: column;
     width: 100%;
-    height: 100%;
+    height: 100vh;
+    min-height: 620px; /* ESTA ES LA CLAVE: Evita que el lienzo colapse */
     position: relative;
     overflow: hidden;
     background: var(--bg);
     border-radius: 12px;
   }
-
+  
   /* ── HEADER ── */
   #header {
     padding: 14px 20px 10px;
